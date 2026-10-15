@@ -757,7 +757,7 @@ export const InboundSchema = z.object({
   nodeId: z.number().int().nullable().optional(),
   originNodeGuid: z.string().optional(),
   port: z.number().int().min(0).max(65535),
-  protocol: z.enum(['vmess', 'vless', 'trojan', 'shadowsocks', 'wireguard', 'hysteria', 'http', 'mixed', 'tunnel', 'tun', 'mtproto', 'amneziawg', 'tuic']),
+  protocol: z.enum(['vmess', 'vless', 'trojan', 'shadowsocks', 'wireguard', 'hysteria', 'http', 'mixed', 'tunnel', 'tun', 'mtproto', 'amneziawg', 'tuic', 'masque']),
   remark: z.string(),
   settings: z.unknown(),
   shareAddr: z.string(),
@@ -1088,26 +1088,6 @@ export const SettingSchema = z.object({
   value: z.string(),
 });
 export type Setting = z.infer<typeof SettingSchema>;
-
-export const SponsorSchema = z.object({
-  enable: z.boolean().nullable().optional(),
-  from: z.string().nullable().optional(),
-  id: z.string(),
-  link: z.string(),
-  logo: z.string().optional(),
-  name: z.string(),
-  slots: z.array(z.string()),
-  text: z.record(z.string(), z.string()),
-  title: z.record(z.string(), z.string()),
-  until: z.string(),
-});
-export type Sponsor = z.infer<typeof SponsorSchema>;
-
-export const SponsorListSchema = z.object({
-  contact: z.string().optional(),
-  sponsors: z.array(z.lazy(() => SponsorSchema)),
-});
-export type SponsorList = z.infer<typeof SponsorListSchema>;
 
 export const SubBalancerSchema = z.object({
   createdAt: z.number().int(),

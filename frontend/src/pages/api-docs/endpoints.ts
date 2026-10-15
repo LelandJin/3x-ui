@@ -237,13 +237,6 @@ export const sections: readonly Section[] = [
         response: '{\n  "success": true,\n  "obj": "csrf-token-string"\n}',
       },
       {
-        method: 'GET',
-        path: '/sponsors',
-        summary:
-          'Public. Active paid sponsor placements read from the project sponsors.json (cached for 1h); entries outside their from/until window are dropped. Logos are proxied by the panel at /sponsors/logo/{name}. Used by the login page and panel sponsor slots.',
-        responseSchema: 'SponsorList',
-      },
-      {
         method: 'POST',
         path: '/getTwoFactorEnable',
         summary:
@@ -2138,7 +2131,7 @@ export const sections: readonly Section[] = [
             name: 'action',
             in: 'path',
             type: 'string',
-            desc: 'data — return Warp stats. del — delete Warp data. config — return current config. reg — register (sends keys). changeIp — rotate the endpoint. license — set a Warp+ key. interval — set automatic rotation in hours.',
+            desc: 'data — return Warp stats. del — delete Warp data. config — return current config. reg — register (sends keys). regMasque — register a separate device enrolled for MASQUE and return its warp key pair, addresses and endpoint. changeIp — rotate the endpoint. license — set a Warp+ key. interval — set automatic rotation in hours.',
           },
           {
             name: 'privateKey',
@@ -2336,14 +2329,14 @@ export const sections: readonly Section[] = [
         method: 'POST',
         path: '/panel/api/xray/balancerOverride',
         summary:
-          'Force a balancer in the running core to always pick one outbound (RoutingService.OverrideBalancerTarget). Applied live without a restart; cleared automatically when Xray restarts.',
+          'Force a balancer in the running core to always pick one outbound (RoutingService.OverrideBalancerTarget). Applied live without a restart and kept across config saves; cleared when Xray restarts or the target outbound is removed.',
         params: [
           { name: 'tag', in: 'body (form)', type: 'string', desc: 'Balancer tag (required).' },
           {
             name: 'target',
             in: 'body (form)',
             type: 'string',
-            desc: 'Outbound tag to force. Empty clears the override and returns control to the strategy.',
+            desc: 'Outbound tag to force; it must exist in the running config. Empty clears the override and returns control to the strategy.',
             optional: true,
           },
         ],
