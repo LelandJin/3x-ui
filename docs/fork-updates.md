@@ -18,6 +18,12 @@ Xray/geodata dependency sources remain unchanged.
   no stable release, so stable requests fail with instructions to use Dev.
   There is no fallback to upstream or from stable to Dev.
 
+The existing version-tag workflow also publishes tagged builds with
+`prerelease: true`. Pushing a version tag alone therefore does not make
+`/releases/latest` available. Stable support requires a separately approved
+release/promotion policy; this updater repair keeps the current Dev-only
+publication policy unchanged.
+
 ## First migration from an older installation
 
 The old deployed panel button and old CLI still download upstream code.
@@ -86,6 +92,9 @@ Linux packaging in `release.yml` must keep writing the full `$GITHUB_SHA` into
 `x-ui/.release-commit` and shipping `x-ui.sh`, OpenRC and systemd units before
 generating the archive checksum. Do not point companions at main or accept a
 rolling release's stale `target_commitish` in place of its build marker.
+Every packaged companion must match the release workflow's main push paths
+so an isolated service-file fix refreshes Dev. The offline regression contract
+checks this relationship and that those inputs also trigger regression CI.
 
 Run `python3 deploy/test/test_fork_updates.py`,
 `python3 deploy/sync-release-source.py --check`, and

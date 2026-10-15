@@ -4,6 +4,7 @@
 Only extracted function definitions run. Mock curl allows fixture URLs only;
 service-control stubs abort immediately if preparation ever reaches mutation.
 """
+import fnmatch
 import hashlib
 import io
 import json
@@ -283,6 +284,37 @@ pkill() { mutation; }
         workflow = (ROOT / '.github/workflows/release.yml').read_text()
         self.assertIn('"$GITHUB_SHA" > x-ui/.release-commit', workflow)
         self.assertIn('cp x-ui.rc x-ui/', workflow)
+
+    def test_packaged_companions_trigger_release_and_regression_ci(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        # Each root-level companion copied into the Linux archive must be able
+        # to refresh dev-latest independently, including the non-.sh OpenRC unit.
+        companions = set(re.findall(
+            r'^\s+cp (x-ui\.(?:sh|rc|service(?:\.[\w-]+)?)) x-ui/\s*$', workflow, re.M))
+        self.assertIn('x-ui.rc', companions)
+        self.assertTrue(any(name.startswith('x-ui.service') for name in companions))
+
+        def path_filters(text):
+            # Restrict to event filters, excluding job steps. These workflows
+            # deliberately use simple quoted lists; no YAML dependency is needed.
+            events = text.split('\njobs:', 1)[0]
+            return [re.findall(r'^      - "([^"]+)"$', block, re.M)
+                    for block in re.findall(r'^    paths:\n((?:      - [^\n]+\n)+)', events, re.M)]
+
+        release_filters = path_filters(workflow)
+        self.assertEqual(len(release_filters), 1, 'expected the main push path filter')
+        for name in sorted(companions):
+            self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) for pattern in release_filters[0]),
+                            f'{name} is packaged but cannot trigger a release on its own')
+
+        # Changing packaged inputs or the release filter must also run this
+        # regression contract on both pull requests and main pushes.
+        ci_filters = path_filters((ROOT / '.github/workflows/ci.yml').read_text())
+        self.assertEqual(len(ci_filters), 2, 'expected PR and main push path filters')
+        for patterns in ci_filters:
+            for name in sorted(companions | {'.github/workflows/release.yml'}):
+                self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns),
+                                f'{name} cannot trigger the companion regression CI')
 
 
 if __name__ == '__main__':
