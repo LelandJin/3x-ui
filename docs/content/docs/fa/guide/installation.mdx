@@ -15,6 +15,10 @@ Virtuozzo، Arch، Manjaro، openSUSE (Tumbleweed/Leap)، Alpine — و همچن
   بوت فعال می‌سازد.
 </Callout>
 
+<Callout type="warn">
+  This fork installs Dev by default and only accepts releases published in LelandJin/3x-ui. Historical unmarked artifacts are unsupported. Read the [first migration guide](https://github.com/LelandJin/3x-ui/blob/main/docs/fork-updates.md) before updating an old installation.
+</Callout>
+
 <Tabs items={['Script', 'Docker', 'Manual']}>
 
 <Tab value="Script">
@@ -23,21 +27,21 @@ Virtuozzo، Arch، Manjaro، openSUSE (Tumbleweed/Leap)، Alpine — و همچن
 مسیر دسترسی (مسیر پایهٔ وب) **تصادفی** تولید می‌کند، سرویس را راه‌اندازی می‌کند و
 دستور مدیریتی `x-ui` را نصب می‌کند.
 
-```bash title="latest stable"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+```bash title="fork rolling Dev"
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 برای نصب یک **نسخهٔ مشخص**، تگ آن را در انتها اضافه کنید:
 
 ```bash title="pinned version"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.4.0
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.4.0
 ```
 
 برای نصب نسخهٔ **dev** غلتان (آخرین پیش‌انتشار به‌ازای هر کامیت از شاخهٔ `main`
 — نه یک نسخهٔ پایدار) عبارت `dev-latest` را پاس دهید:
 
 ```bash title="rolling dev build"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest
 ```
 
 پس از پایان نصب، مشخصات ورود چاپ‌شده را یادداشت کنید و دستور `x-ui` را اجرا کنید تا
@@ -122,7 +126,7 @@ docker run -d \
 `/etc/x-ui/install-result.env` بنویسد:
 
 ```bash
-XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 دایرکتوری [`deploy/`](https://github.com/MHSanaei/3x-ui/tree/main/deploy) در مخزن

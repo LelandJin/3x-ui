@@ -14,6 +14,10 @@ across `amd64`, `386`, `arm64`, `armv7`, `armv6`, `armv5`, and `s390x`.
   sets up the `x-ui` management command, and enables the panel on boot.
 </Callout>
 
+<Callout type="warn">
+  This fork installs Dev by default and only accepts releases published in LelandJin/3x-ui. Historical unmarked artifacts are unsupported. Read the [first migration guide](https://github.com/LelandJin/3x-ui/blob/main/docs/fork-updates.md) before updating an old installation.
+</Callout>
+
 <Tabs items={['Script', 'Docker', 'Manual']}>
 
 <Tab value="Script">
@@ -22,21 +26,21 @@ The official script is the recommended path. During installation it generates a
 **random** username, password, and access (web base) path, sets up the service,
 and installs the `x-ui` management command.
 
-```bash title="latest stable"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+```bash title="fork rolling Dev"
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 Install a **specific version** by appending its tag:
 
 ```bash title="pinned version"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.4.0
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.4.0
 ```
 
 Install the rolling **dev** build (the latest per-commit pre-release from `main`
 — not a stable release) by passing `dev-latest`:
 
 ```bash title="rolling dev build"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest
 ```
 
 When it finishes, note the printed login details and run `x-ui` to open the
@@ -120,7 +124,7 @@ prompts, generating random credentials and writing them to
 `/etc/x-ui/install-result.env`:
 
 ```bash
-XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 The repo's [`deploy/`](https://github.com/MHSanaei/3x-ui/tree/main/deploy)

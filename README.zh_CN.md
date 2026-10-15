@@ -73,20 +73,22 @@
 
 ## 快速开始
 
+> 本 fork 默认安装滚动 Dev 版本，仅支持 `LelandJin/3x-ui` 发布的完整产物；旧的无提交标记产物将被拒绝。首次迁移及维护请参阅 [fork 更新说明](docs/fork-updates.md)。
+
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 若要安装特定版本，请在命令后附加对应的标签（例如 `v3.7.0`）：
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.7.0
 ```
 
 若要安装滚动更新的 **dev** 版本（来自 `main` 的最新逐次提交预发布版本，而非稳定版本），请传入 `dev-latest`：
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest
 ```
 
 安装过程中会生成随机的用户名、密码和访问路径。安装完成后，运行 `x-ui` 打开管理菜单，您可以在其中启动/停止服务、查看或重置登录凭据、管理 SSL 证书等。

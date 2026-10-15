@@ -73,20 +73,22 @@
 
 ## Быстрый старт
 
+> This fork defaults to the rolling Dev channel. Only releases published in `LelandJin/3x-ui` are supported; historical unmarked artifacts are refused. See [fork updates and first migration](docs/fork-updates.md).
+
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 Чтобы установить конкретную версию, добавьте её тег (например, `v3.7.0`):
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.7.0
 ```
 
 Чтобы установить скользящую **dev**-сборку (новейший предварительный релиз по каждому коммиту из ветки `main`, а не стабильный релиз), передайте `dev-latest`:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest
 ```
 
 Во время установки генерируются случайные имя пользователя, пароль и путь доступа. После установки выполните `x-ui`, чтобы открыть меню управления, где можно запускать/останавливать сервис, просматривать или сбрасывать учётные данные для входа, управлять SSL-сертификатами и многое другое.

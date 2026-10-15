@@ -110,6 +110,8 @@ jobs:
           cp x-ui.service.arch x-ui/
           cp x-ui.service.rhel x-ui/
           cp x-ui.sh x-ui/
+          cp x-ui.rc x-ui/
+          printf '%s\n' "$GITHUB_SHA" > x-ui/.release-commit
           mv x-ui/xui-release x-ui/x-ui
           mkdir x-ui/bin
           cd x-ui/bin

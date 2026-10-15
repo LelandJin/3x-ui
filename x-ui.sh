@@ -1,5 +1,155 @@
 #!/bin/bash
 
+# BEGIN FORK RELEASE SOURCE
+# Embedded verbatim in standalone scripts by deploy/sync-release-source.py.
+# Keep panel release constants in internal/web/service/panel/panel.go in sync.
+# FORK_RELEASE_PROTOCOL=1
+XUI_RELEASE_REPO="LelandJin/3x-ui"
+XUI_RELEASE_API="https://api.github.com/repos/${XUI_RELEASE_REPO}"
+XUI_RELEASE_RAW="https://raw.githubusercontent.com/${XUI_RELEASE_REPO}"
+
+xui_release_error() {
+    echo "ERROR: $*. Existing installation has not been replaced." >&2
+    return 1
+}
+
+xui_download() {
+    local url="$1" dest="$2"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 600 \
+        -o "${dest}" "${url}" && [[ -s "${dest}" ]] || {
+        rm -f "${dest}"
+        xui_release_error "Download unavailable or empty: ${url}"
+    }
+}
+
+xui_check_script() {
+    grep -qx '# FORK_RELEASE_PROTOCOL=1' "$1" &&
+        grep -qx 'XUI_RELEASE_REPO="LelandJin/3x-ui"' "$1" && bash -n "$1" || {
+        xui_release_error "Release predates the fork updater; use a repaired fork release";
+    }
+}
+
+# Re-execute standalone main downloads at the selected release commit too.
+# Panel/CLI launchers already set the expected commit and skip this bootstrap.
+xui_run_pinned_script() (
+    local name="$1" temp
+    temp=$(mktemp) || exit 1
+    trap 'rm -f "${temp}"' EXIT
+    xui_download "${XUI_RELEASE_RAW}/${XUI_RELEASE_COMMIT}/${name}" "${temp}" || exit 1
+    xui_check_script "${temp}" || exit 1
+    XUI_EXPECTED_COMMIT="${XUI_RELEASE_COMMIT}" XUI_UPDATE_TAG="${XUI_RELEASE_TAG}" \
+        bash "${temp}" "${XUI_RELEASE_TAG}"
+)
+
+# No upstream or stable fallback: this fork currently publishes dev-latest only.
+# An explicit stable channel or version must actually exist in this fork.
+xui_resolve_release() {
+    local requested="${1:-dev-latest}" endpoint commit_json
+    command -v jq > /dev/null 2>&1 || { xui_release_error "jq is required (install jq and retry)"; return 1; }
+    case "${requested}" in
+        dev | dev-latest) requested="dev-latest"; endpoint="tags/dev-latest" ;;
+        stable) endpoint="latest" ;;
+        *)
+            [[ "${requested}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+                xui_release_error "Use dev, stable, or an explicit fork version such as v3.10.2"; return 1;
+            }
+            requested="v${requested#v}"; endpoint="tags/${requested}"
+            ;;
+    esac
+    XUI_RELEASE_JSON=$(curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 "${XUI_RELEASE_API}/releases/${endpoint}") || {
+        xui_release_error "Fork release ${requested} is unavailable; use Dev (dev-latest) when no stable release exists"; return 1;
+    }
+    XUI_RELEASE_TAG=$(printf '%s' "${XUI_RELEASE_JSON}" | jq -er '.tag_name | select(type == "string")') || return 1
+    [[ "${XUI_RELEASE_TAG}" == "${requested}" || ( "${requested}" == "stable" && "${XUI_RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ) ]] || {
+        xui_release_error "Unexpected fork release tag"; return 1;
+    }
+    # target_commitish on an edited rolling release can remain the original
+    # creation commit. Only the CI body marker identifies the published build.
+    if [[ "${XUI_RELEASE_TAG}" == "dev-latest" ]]; then
+        XUI_RELEASE_COMMIT=$(printf '%s' "${XUI_RELEASE_JSON}" | jq -er '.body | capture("(?im)^commit=(?<sha>[0-9a-f]{40})\\r?$").sha | ascii_downcase') || {
+            xui_release_error "Dev release has no full build commit marker"; return 1;
+        }
+    else
+        commit_json=$(curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 "${XUI_RELEASE_API}/commits/${XUI_RELEASE_TAG}") || return 1
+        XUI_RELEASE_COMMIT=$(printf '%s' "${commit_json}" | jq -er '.sha') || return 1
+    fi
+    [[ "${XUI_RELEASE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] || { xui_release_error "Release commit is unknown"; return 1; }
+    # Panel/CLI launchers pass the exact release they used to obtain the script.
+    [[ -z "${XUI_EXPECTED_COMMIT:-}" || "${XUI_EXPECTED_COMMIT}" == "${XUI_RELEASE_COMMIT}" ]] || {
+        xui_release_error "Release moved while preparing the updater; retry"; return 1;
+    }
+}
+
+xui_asset_url() {
+    local name="$1" url expected
+    expected="https://github.com/${XUI_RELEASE_REPO}/releases/download/${XUI_RELEASE_TAG}/${name}"
+    url=$(printf '%s' "${XUI_RELEASE_JSON}" | jq -er --arg name "${name}" '[.assets[] | select(.name == $name) | .browser_download_url] | select(length == 1) | .[0]') || {
+        xui_release_error "Required release asset ${name} is missing"; return 1;
+    }
+    [[ "${url}" == "${expected}" ]] || { xui_release_error "Unexpected asset source for ${name}"; return 1; }
+    printf '%s\n' "${url}"
+}
+
+xui_verify_checksum() {
+    local file="$1" sums="$2" expected actual
+    expected=$(awk 'NR == 1 {print $1}' "${sums}")
+    if command -v sha256sum > /dev/null 2>&1; then
+        actual=$(sha256sum "${file}") || return 1
+    else
+        actual=$(shasum -a 256 "${file}") || return 1
+    fi
+    actual="${actual%% *}"
+    [[ "${expected}" =~ ^[0-9a-f]{64}$ && "${actual}" == "${expected}" ]] || {
+        xui_release_error "Required SHA256 checksum is invalid or does not match"; return 1;
+    }
+}
+
+# Stage every required resource before the caller stops or removes anything.
+# The archive marker also detects the publish-dev window where release notes
+# point at commit B but some of the moving tag's assets still belong to A.
+xui_prepare_release() {
+    local stage="$1" platform="$2" os_release="$3" asset url sums_url marker unit name
+    asset="x-ui-linux-${platform}.tar.gz"
+    url=$(xui_asset_url "${asset}") || return 1
+    sums_url=$(xui_asset_url "${asset}.sha256") || return 1
+    xui_download "${url}" "${stage}/archive.tar.gz" || return 1
+    xui_download "${sums_url}" "${stage}/archive.sha256" || return 1
+    xui_verify_checksum "${stage}/archive.tar.gz" "${stage}/archive.sha256" || return 1
+    tar -tzf "${stage}/archive.tar.gz" > "${stage}/entries" || { xui_release_error "Invalid release archive"; return 1; }
+    awk '$0 !~ /^x-ui\// || $0 ~ /(^|\/)\.\.(\/|$)/ {bad=1} END {exit bad}' "${stage}/entries" || {
+        xui_release_error "Unsafe archive paths"; return 1;
+    }
+    # Release packages contain regular files/directories, never links/devices.
+    tar -tvzf "${stage}/archive.tar.gz" | awk 'substr($0,1,1) !~ /[-d]/ {bad=1} END {exit bad}' || {
+        xui_release_error "Unsupported archive entry"; return 1;
+    }
+    tar -xzf "${stage}/archive.tar.gz" -C "${stage}" || { xui_release_error "Cannot extract release"; return 1; }
+    marker=$(cat "${stage}/x-ui/.release-commit" 2> /dev/null)
+    [[ "${marker}" == "${XUI_RELEASE_COMMIT}" ]] || {
+        xui_release_error "Archive build commit does not match release; retry after publishing finishes (older unmarked artifacts are unsupported)"; return 1;
+    }
+    [[ -s "${stage}/x-ui/x-ui" && -s "${stage}/x-ui/bin/xray-linux-${platform}" ]] || {
+        xui_release_error "Release is missing required binaries"; return 1;
+    }
+    case "${os_release}" in
+        alpine) unit="x-ui.rc" ;;
+        ubuntu | debian | armbian) unit="x-ui.service.debian" ;;
+        arch | manjaro | parch) unit="x-ui.service.arch" ;;
+        *) unit="x-ui.service.rhel" ;;
+    esac
+    # Prefer checksum-covered companions; fallback is pinned to the full commit.
+    [[ "${os_release}" != "alpine" && -s "${stage}/x-ui/x-ui.service" ]] && unit="x-ui.service"
+    for name in x-ui.sh "${unit}"; do
+        if [[ ! -s "${stage}/x-ui/${name}" ]]; then
+            xui_download "${XUI_RELEASE_RAW}/${XUI_RELEASE_COMMIT}/${name}" "${stage}/x-ui/${name}" || return 1
+        fi
+    done
+    cp "${stage}/x-ui/${unit}" "${stage}/service-unit" || return 1
+    bash -n "${stage}/x-ui/x-ui.sh" || { xui_release_error "Invalid CLI script"; return 1; }
+    rm -f "${stage}/archive.tar.gz" "${stage}/archive.sha256" "${stage}/entries"
+}
+# END FORK RELEASE SOURCE
+
 red='\033[0;31m'
 green='\033[0;32m'
 blue='\033[0;34m'
@@ -129,7 +279,8 @@ before_show_menu() {
 }
 
 install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/install.sh)
+    # $1 is the existing CLI/menu sentinel (0), not a release version.
+    run_release_script install.sh dev-latest || return 1
     if [[ $? == 0 ]]; then
         if [[ $# == 0 ]]; then
             start
@@ -140,7 +291,7 @@ install() {
 }
 
 update() {
-    confirm "This function will update all x-ui components to the latest version, and the data will not be lost. Do you want to continue?" "y"
+    confirm "This function will update all x-ui components to the latest fork DEV build (dev-latest), and the data will not be lost. Do you want to continue?" "y"
     if [[ $? != 0 ]]; then
         LOGE "Cancelled"
         if [[ $# == 0 ]]; then
@@ -148,7 +299,7 @@ update() {
         fi
         return 0
     fi
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
+    run_release_script update.sh dev-latest || return 1
     if [[ $? == 0 ]]; then
         LOGI "Update is complete, Panel has automatically restarted "
         before_show_menu
@@ -164,9 +315,7 @@ update_dev() {
         fi
         return 0
     fi
-    # XUI_UPDATE_TAG tells update.sh to install the dev-latest pre-release
-    # instead of the latest stable tag.
-    XUI_UPDATE_TAG="dev-latest" bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/main/update.sh)
+    run_release_script update.sh dev-latest || return 1
     if [[ $? == 0 ]]; then
         LOGI "Dev update is complete, Panel has automatically restarted "
         before_show_menu
@@ -175,25 +324,11 @@ update_dev() {
 
 replace_xui_script() {
     local url="$1"
-    local use_if_modified_since="$2"
     local temp_file="/usr/bin/x-ui-temp.$$"
 
     rm -f "$temp_file"
-    if [[ "$use_if_modified_since" == "true" ]]; then
-        curl -fLRo "$temp_file" -z /usr/bin/x-ui "$url"
-    else
-        curl -fLRo "$temp_file" "$url"
-    fi
-    if [[ $? != 0 ]]; then
+    if ! xui_download "$url" "$temp_file" || ! xui_check_script "$temp_file"; then
         rm -f "$temp_file"
-        return 1
-    fi
-
-    if [[ ! -s "$temp_file" ]]; then
-        rm -f "$temp_file"
-        # -z above means "not modified since /usr/bin/x-ui" rather than a
-        # real failure, so an empty download here is success, not an error.
-        [[ "$use_if_modified_since" == "true" ]] && return 0
         return 1
     fi
 
@@ -208,17 +343,21 @@ replace_xui_script() {
     return 0
 }
 
-# The menu must match the installed panel, so update it from that release's
-# tag; fall back to main only when no script is published for the version.
+# Refresh the menu from the commit recorded alongside the installed binary.
+# Old installations must first migrate using the repaired fork release.
 installed_script_url() {
-    local ver
-    ver=$("${xui_folder}/x-ui" -v 2> /dev/null | tr -d '[:space:]')
-    if [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && curl -fsIL -o /dev/null "https://raw.githubusercontent.com/MHSanaei/3x-ui/v${ver}/x-ui.sh"; then
-        echo "https://raw.githubusercontent.com/MHSanaei/3x-ui/v${ver}/x-ui.sh"
-    else
-        echo -e "${yellow}No x-ui.sh published for the installed version (${ver:-unknown}), using main${plain}" >&2
-        echo "https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh"
-    fi
+    local commit
+    commit=$(cat "${xui_folder}/.release-commit" 2> /dev/null)
+    [[ "${commit}" =~ ^[0-9a-f]{40}$ ]] || {
+        xui_release_error "Installed build has no release commit; migrate using the repaired fork installer"; return 1;
+    }
+    printf '%s/%s/x-ui.sh\n' "${XUI_RELEASE_RAW}" "${commit}"
+}
+
+run_release_script() {
+    local name="$1" requested="${2:-dev-latest}"
+    xui_resolve_release "${requested}" || return 1
+    xui_run_pinned_script "${name}"
 }
 
 update_menu() {
@@ -232,7 +371,9 @@ update_menu() {
         return 0
     fi
 
-    if replace_xui_script "$(installed_script_url)" "false"; then
+    local script_url
+    script_url=$(installed_script_url) || return 1
+    if replace_xui_script "${script_url}"; then
         chmod +x ${xui_folder}/x-ui.sh
         echo -e "${green}Update successful. The panel has automatically restarted.${plain}"
         exit 0
@@ -250,11 +391,7 @@ legacy_version() {
         echo "Panel version cannot be empty. Exiting."
         exit 1
     fi
-    # Use the entered panel version in the download link
-    install_command="bash <(curl -Ls "https://raw.githubusercontent.com/mhsanaei/3x-ui/v$tag_version/install.sh") v$tag_version"
-
-    echo "Downloading and installing panel version $tag_version..."
-    eval $install_command
+    run_release_script install.sh "${tag_version}"
 }
 
 # Function to handle the deletion of the script file
@@ -322,7 +459,7 @@ uninstall() {
     echo ""
     echo -e "Uninstalled Successfully.\n"
     echo "If you need to install this panel again, you can use below command:"
-    echo -e "${green}bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)${plain}"
+    echo -e "${green}Fork installation instructions: https://github.com/LelandJin/3x-ui/blob/main/docs/fork-updates.md${plain}"
     echo ""
     # Trap the SIGTERM signal
     trap delete_script SIGTERM
@@ -855,7 +992,9 @@ enable_bbr() {
 }
 
 update_shell() {
-    if replace_xui_script "$(installed_script_url)" "true"; then
+    local script_url
+    script_url=$(installed_script_url) || return 1
+    if replace_xui_script "${script_url}"; then
         LOGI "Upgrade script succeeded, Please rerun the script"
         before_show_menu
     else

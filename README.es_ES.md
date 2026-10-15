@@ -73,20 +73,22 @@ Construido como un fork mejorado del proyecto X-UI original, 3X-UI añade un sop
 
 ## Inicio Rápido
 
+> This fork defaults to the rolling Dev channel. Only releases published in `LelandJin/3x-ui` are supported; historical unmarked artifacts are refused. See [fork updates and first migration](docs/fork-updates.md).
+
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 Para instalar una versión específica, añade su etiqueta (p. ej. `v3.7.0`):
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.7.0
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.7.0
 ```
 
 Para instalar la versión **dev** continua (la última prelanzamiento por commit desde `main`, no una versión estable), pasa `dev-latest`:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest
 ```
 
 Durante la instalación se generan un nombre de usuario, una contraseña y una ruta de acceso aleatorios. Tras la instalación, ejecuta `x-ui` para abrir el menú de gestión, donde puedes iniciar/detener el servicio, ver o restablecer tus credenciales de acceso, gestionar certificados SSL y mucho más.

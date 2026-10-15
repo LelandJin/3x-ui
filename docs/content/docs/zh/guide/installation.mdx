@@ -14,6 +14,10 @@ Virtuozzo、Arch、Manjaro、openSUSE（Tumbleweed/Leap）、Alpine——以及 
   配置 `x-ui` 管理命令，并将面板设为开机自启。
 </Callout>
 
+<Callout type="warn">
+  This fork installs Dev by default and only accepts releases published in LelandJin/3x-ui. Historical unmarked artifacts are unsupported. Read the [first migration guide](https://github.com/LelandJin/3x-ui/blob/main/docs/fork-updates.md) before updating an old installation.
+</Callout>
+
 <Tabs items={['Script', 'Docker', 'Manual']}>
 
 <Tab value="Script">
@@ -21,21 +25,21 @@ Virtuozzo、Arch、Manjaro、openSUSE（Tumbleweed/Leap）、Alpine——以及 
 官方脚本是推荐的安装方式。安装过程中，它会生成一个**随机**的用户名、密码和访问（Web 根）路径，配置服务，
 并安装 `x-ui` 管理命令。
 
-```bash title="latest stable"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+```bash title="fork rolling Dev"
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 在命令后附加标签即可安装**指定版本**：
 
 ```bash title="pinned version"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.4.0
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.4.0
 ```
 
 传入 `dev-latest` 可安装滚动更新的**开发版**构建（来自 `main` 的最新逐提交预发布版本
 ——并非稳定版）：
 
 ```bash title="rolling dev build"
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest
+bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest
 ```
 
 安装完成后，记下打印出的登录信息并运行 `x-ui` 打开
@@ -118,7 +122,7 @@ docker run -d \
 `/etc/x-ui/install-result.env`：
 
 ```bash
-XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+XUI_NONINTERACTIVE=1 bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)
 ```
 
 仓库的 [`deploy/`](https://github.com/MHSanaei/3x-ui/tree/main/deploy)

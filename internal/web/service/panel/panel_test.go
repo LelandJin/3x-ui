@@ -2,8 +2,11 @@ package panel
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -104,15 +107,18 @@ func TestExtractReleaseCommit(t *testing.T) {
 			want:    full,
 		},
 		{
-			name:    "fallback to target commit sha",
+			name:    "stale target commit is not a build marker",
 			release: service.Release{Body: "no marker here", TargetCommitish: full},
-			want:    full,
+			want:    "",
 		},
 		{
 			name:    "branch target is not a commit",
 			release: service.Release{Body: "no marker", TargetCommitish: "main"},
 			want:    "",
 		},
+		{name: "short marker refused", release: service.Release{Body: "commit=deadbeef"}},
+		{name: "long marker refused", release: service.Release{Body: "commit=" + full + "a"}},
+		{name: "inline marker refused", release: service.Release{Body: "not commit=" + full}},
 	}
 	for _, tc := range cases {
 		if got := extractReleaseCommit(&tc.release); got != tc.want {
@@ -133,11 +139,91 @@ func TestCommitsEqual(t *testing.T) {
 		{"deadbeef", full, false}, // different commit
 		{"", full, false},         // empty current never matches
 		{"1a2b3c4d", "", false},   // empty latest never matches
+		{"1", full, false},
+		{"unknown", full, false},
 	}
 	for _, tc := range cases {
 		if got := commitsEqual(tc.a, tc.b); got != tc.want {
 			t.Fatalf("commitsEqual(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
 		}
+	}
+}
+
+type panelRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f panelRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func panelFixtureClient(t *testing.T, routes map[string]string) *http.Client {
+	t.Helper()
+	return &http.Client{Transport: panelRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, ok := routes[r.URL.String()]
+		if !ok {
+			t.Errorf("unexpected release request: %s", r.URL)
+			return nil, fmt.Errorf("unmocked URL")
+		}
+		status := http.StatusOK
+		if body == "404" {
+			status = http.StatusNotFound
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}
+}
+
+func TestForkPanelReleaseResolution(t *testing.T) {
+	full := strings.Repeat("a", 40)
+	for _, dev := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dev=%v", dev), func(t *testing.T) {
+			tag, endpoint := "v3.10.2", "/releases/latest"
+			if dev {
+				tag, endpoint = "dev-latest", "/releases/tags/dev-latest"
+			}
+			routes := map[string]string{
+				panelReleaseAPI + endpoint:           fmt.Sprintf(`{"tag_name":%q,"body":%q,"target_commitish":%q}`, tag, "commit="+full, strings.Repeat("b", 40)),
+				panelReleaseAPI + "/commits/v3.10.2": fmt.Sprintf(`{"sha":%q}`, full),
+			}
+			release, commit, err := resolvePanelUpdateReleaseWithClient(panelFixtureClient(t, routes), dev)
+			if err != nil || commit != full || release.TagName != tag {
+				t.Fatalf("resolve: %v %q %v", release, commit, err)
+			}
+		})
+	}
+	client := panelFixtureClient(t, map[string]string{panelReleaseAPI + "/releases/latest": "404"})
+	if _, _, err := resolvePanelUpdateReleaseWithClient(client, false); err == nil || !strings.Contains(err.Error(), "Dev channel") {
+		t.Fatalf("missing stable must explain Dev channel, got %v", err)
+	}
+	client = panelFixtureClient(t, map[string]string{panelReleaseAPI + "/releases/tags/dev-latest": `{"tag_name":"dev-latest","target_commitish":"` + full + `"}`})
+	if _, _, err := resolvePanelUpdateReleaseWithClient(client, true); err == nil {
+		t.Fatal("missing Dev build marker accepted")
+	}
+}
+
+func TestForkPanelUpdaterDownload(t *testing.T) {
+	full := strings.Repeat("a", 40)
+	url, err := panelUpdaterURL(full)
+	if err != nil || url != "https://raw.githubusercontent.com/LelandJin/3x-ui/"+full+"/update.sh" {
+		t.Fatalf("unpinned updater: %q %v", url, err)
+	}
+	for _, invalid := range []string{"main", "dev-latest", "deadbeef", full + "a"} {
+		if _, err := panelUpdaterURL(invalid); err == nil {
+			t.Fatalf("accepted ref %q", invalid)
+		}
+	}
+	for _, body := range []string{"404", "", "#!/bin/bash\necho old-upstream-updater\n", strings.Repeat("x", maxPanelUpdaterBytes+1)} {
+		client := panelFixtureClient(t, map[string]string{url: body})
+		if path, err := downloadPanelUpdaterWithClient(client, full); err == nil {
+			_ = os.Remove(path)
+			t.Fatalf("accepted invalid updater of %d bytes", len(body))
+		}
+	}
+	body := "#!/bin/bash\n# FORK_RELEASE_PROTOCOL=1\nXUI_RELEASE_REPO=\"LelandJin/3x-ui\"\n"
+	path, err := downloadPanelUpdaterWithClient(panelFixtureClient(t, map[string]string{url: body}), full)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(path) })
+	data, err := os.ReadFile(path)
+	if err != nil || string(data) != body {
+		t.Fatalf("download content: %q %v", data, err)
 	}
 }
 

@@ -15,23 +15,23 @@ const base: InstallOptions = {
 };
 
 describe('buildScriptCommand', () => {
-  it('uses the master install.sh for the latest version', () => {
+  it('uses the fork installer for the default Dev build', () => {
     expect(buildScriptCommand(base)).toBe(
-      'bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)',
+      'bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh)',
     );
   });
 
-  it('pins a specific version by passing the tag to master install.sh', () => {
+  it('pins a specific version by passing the tag to the fork installer', () => {
     const cmd = buildScriptCommand({ ...base, version: 'v3.4.1' });
     expect(cmd).toBe(
-      'bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) v3.4.1',
+      'bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) v3.4.1',
     );
   });
 
   it('supports the rolling dev-latest build', () => {
     const cmd = buildScriptCommand({ ...base, version: 'dev-latest' });
     expect(cmd).toBe(
-      'bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh) dev-latest',
+      'bash <(curl -Ls https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh) dev-latest',
     );
   });
 });
