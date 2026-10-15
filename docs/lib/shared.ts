@@ -30,9 +30,6 @@ export const deepWikiUrl = `https://deepwiki.com/${productRepo.user}/${productRe
 export const telegramChannel = 'XrayUI';
 export const telegramChannelUrl = `https://t.me/${telegramChannel}`;
 
-// Support the developer — donation page with funding goals/targets.
-export const donateUrl = 'https://donate.sanaei.dev/';
-
 // Public site origin, used for metadataBase / canonical URLs / OG images.
 // Defaults to the production domain, so the env var is optional. Use `||` (not
 // `??`) so an empty string — e.g. an unset `${{ vars.NEXT_PUBLIC_SITE_URL }}`

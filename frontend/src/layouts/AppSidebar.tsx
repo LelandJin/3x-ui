@@ -11,14 +11,12 @@ import {
   CloudServerOutlined,
   ClusterOutlined,
   CodeOutlined,
-  CrownOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   DiscordOutlined,
   ExportOutlined,
   GithubOutlined,
   GlobalOutlined,
-  HeartOutlined,
   ImportOutlined,
   LogoutOutlined,
   MailOutlined,
@@ -46,7 +44,6 @@ import { useAllSettings } from '@/api/queries/useAllSettings';
 import { useCommandPalette } from '@/components/command-palette/useCommandPalette';
 import './AppSidebar.css';
 
-const DONATE_URL = 'https://donate.sanaei.dev/';
 // The palette listens for Ctrl as well as Cmd, so the chip must not show a
 // Mac glyph to the Linux and Windows operators who are most of this panel's.
 const SHORTCUT_MODIFIER = /Mac|iPhone|iPad|iPod/.test(navigator.userAgent) ? '⌘' : 'Ctrl';
@@ -69,7 +66,6 @@ type IconName =
   | 'cluster'
   | 'hosts'
   | 'logout'
-  | 'sponsors'
   | 'apidocs'
   | 'outbound'
   | 'routing';
@@ -84,26 +80,10 @@ const iconByName: Record<IconName, ComponentType> = {
   cluster: ClusterOutlined,
   hosts: GlobalOutlined,
   logout: LogoutOutlined,
-  sponsors: CrownOutlined,
   apidocs: ApiOutlined,
   outbound: ExportOutlined,
   routing: SwapOutlined,
 };
-
-function DonateButton({ ariaLabel }: { ariaLabel: string }) {
-  return (
-    <a
-      href={DONATE_URL}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="sidebar-donate"
-      aria-label={ariaLabel}
-      title={ariaLabel}
-    >
-      <HeartOutlined />
-    </a>
-  );
-}
 
 function DocsButton({ ariaLabel }: { ariaLabel: string }) {
   return (
@@ -235,7 +215,6 @@ export default function AppSidebar() {
       { key: '/settings', icon: 'setting', title: t('menu.settings') },
       { key: '/xray', icon: 'tool', title: t('menu.xray') },
       { key: '/api-docs', icon: 'apidocs', title: t('menu.apiDocs') },
-      { key: '/sponsors', icon: 'sponsors', title: t('menu.sponsors') },
       { key: LOGOUT_KEY, icon: 'logout', title: t('logout') },
     ],
     [t],
@@ -397,7 +376,6 @@ export default function AppSidebar() {
                 {pinned ? <PushpinFilled /> : <PushpinOutlined />}
               </button>
               <DocsButton ariaLabel={t('menu.docs') || 'Documentation'} />
-              <DonateButton ariaLabel={t('menu.donate') || 'Donate'} />
               <ThemeCycleButton
                 id="theme-cycle"
                 isDark={isDark}
@@ -474,7 +452,6 @@ export default function AppSidebar() {
           </div>
           <div className="drawer-header-actions">
             <DocsButton ariaLabel={t('menu.docs') || 'Documentation'} />
-            <DonateButton ariaLabel={t('menu.donate') || 'Donate'} />
             <ThemeCycleButton
               id="theme-cycle-drawer"
               isDark={isDark}

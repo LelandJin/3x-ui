@@ -201,19 +201,6 @@ English · فارسی · العربية · 中文（简体） · 中文（繁體
 - [terraform-provider-3x-ui](https://github.com/batonogov/terraform-provider-threexui) (مجوز: **MIT**): _مدیریت اینباندها، کلاینت‌ها، تنظیمات پنل و پیکربندی Xray به‌صورت کد با Terraform / OpenTofu._
 - [3X-UI Manager](https://github.com/yukh975/3X-UI-Manager) (مجوز: **MIT**): _کلاینت بومی اندروید برای 3x-ui — داشبورد، اینباندها، کلاینت‌ها با اشتراک‌گذاری QR، نودها و مدیریت چند پنل. در F-Droid در دسترس است._
 
-## پشتیبانی از پروژه
-
-**اگر این پروژه برای شما مفید است، می‌توانید به آن یک**:star2: بدهید
-
-<a href="https://www.buymeacoffee.com/MHSanaei" target="_blank">
-<img src="./media/default-yellow.png" alt="Buy Me A Coffee" style="height: 70px !important;width: 277px !important;" >
-</a>
-
-</br>
-<a href="https://nowpayments.io/donation/hsanaei" target="_blank" rel="noreferrer noopener">
-   <img src="./media/donation-button-black.svg" alt="Crypto donation button by NOWPayments">
-</a>
-
 ## تاریخچه ستاره‌ها
 
 <a href="https://www.star-history.com/?repos=mhsanaei%2F3x-ui&type=date&legend=top-left">
