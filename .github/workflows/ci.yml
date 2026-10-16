@@ -10,6 +10,13 @@ on:
       - ".nvmrc"
       - "Makefile"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
+      - "x-ui.rc"
+      - "x-ui.service.*"
+      - "*.sh"
+      - "deploy/release-source.sh"
+      - "deploy/sync-release-source.py"
+      - "deploy/test/test_fork_updates.py"
   push:
     branches:
       - main
@@ -21,11 +28,29 @@ on:
       - ".nvmrc"
       - "Makefile"
       - ".github/workflows/ci.yml"
+      - ".github/workflows/release.yml"
+      - "x-ui.rc"
+      - "x-ui.service.*"
+      - "*.sh"
+      - "deploy/release-source.sh"
+      - "deploy/sync-release-source.py"
+      - "deploy/test/test_fork_updates.py"
 
 permissions:
   contents: read
 
 jobs:
+  fork-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check standalone script consistency and syntax
+        run: |
+          python3 deploy/sync-release-source.py --check
+          bash -n install.sh update.sh x-ui.sh deploy/release-source.sh
+      - name: Offline fork update regression tests (no host installation)
+        run: python3 deploy/test/test_fork_updates.py
+
   go-test:
     runs-on: ubuntu-latest
     steps:

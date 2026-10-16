@@ -4,14 +4,14 @@ export type InstallMethod = 'script' | 'docker';
 
 export interface InstallOptions {
   method: InstallMethod;
-  /** A release tag like `v3.4.1`, or empty/`latest` for the latest release. */
+  /** A release tag like `v3.4.1`, or empty/`latest` for the fork Dev build. */
   version: string;
   enableFail2ban: boolean;
   panelPort: string;
   webBasePath: string;
 }
 
-const REPO_RAW = 'https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh';
+const REPO_RAW = 'https://raw.githubusercontent.com/LelandJin/3x-ui/main/install.sh';
 const IMAGE = 'ghcr.io/mhsanaei/3x-ui:latest';
 
 function isLatest(version: string): boolean {
@@ -20,9 +20,9 @@ function isLatest(version: string): boolean {
 }
 
 /**
- * The one-line script install command. The master install script reads the
- * version as its first argument: empty = latest stable release, a tag like
- * `v3.4.0` = that release, and `dev-latest` = the rolling per-commit dev build.
+ * The one-line script install command. The fork install script reads the
+ * version as its first argument: empty = fork dev-latest, a tag like
+ * `v3.4.0` = that fork release, and `dev-latest` = the rolling per-commit dev build.
  */
 export function buildScriptCommand(options: InstallOptions): string {
   if (isLatest(options.version)) {

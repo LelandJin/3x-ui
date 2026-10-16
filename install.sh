@@ -1,5 +1,155 @@
 #!/bin/bash
 
+# BEGIN FORK RELEASE SOURCE
+# Embedded verbatim in standalone scripts by deploy/sync-release-source.py.
+# Keep panel release constants in internal/web/service/panel/panel.go in sync.
+# FORK_RELEASE_PROTOCOL=1
+XUI_RELEASE_REPO="LelandJin/3x-ui"
+XUI_RELEASE_API="https://api.github.com/repos/${XUI_RELEASE_REPO}"
+XUI_RELEASE_RAW="https://raw.githubusercontent.com/${XUI_RELEASE_REPO}"
+
+xui_release_error() {
+    echo "ERROR: $*. Existing installation has not been replaced." >&2
+    return 1
+}
+
+xui_download() {
+    local url="$1" dest="$2"
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 600 \
+        -o "${dest}" "${url}" && [[ -s "${dest}" ]] || {
+        rm -f "${dest}"
+        xui_release_error "Download unavailable or empty: ${url}"
+    }
+}
+
+xui_check_script() {
+    grep -qx '# FORK_RELEASE_PROTOCOL=1' "$1" &&
+        grep -qx 'XUI_RELEASE_REPO="LelandJin/3x-ui"' "$1" && bash -n "$1" || {
+        xui_release_error "Release predates the fork updater; use a repaired fork release";
+    }
+}
+
+# Re-execute standalone main downloads at the selected release commit too.
+# Panel/CLI launchers already set the expected commit and skip this bootstrap.
+xui_run_pinned_script() (
+    local name="$1" temp
+    temp=$(mktemp) || exit 1
+    trap 'rm -f "${temp}"' EXIT
+    xui_download "${XUI_RELEASE_RAW}/${XUI_RELEASE_COMMIT}/${name}" "${temp}" || exit 1
+    xui_check_script "${temp}" || exit 1
+    XUI_EXPECTED_COMMIT="${XUI_RELEASE_COMMIT}" XUI_UPDATE_TAG="${XUI_RELEASE_TAG}" \
+        bash "${temp}" "${XUI_RELEASE_TAG}"
+)
+
+# No upstream or stable fallback: this fork currently publishes dev-latest only.
+# An explicit stable channel or version must actually exist in this fork.
+xui_resolve_release() {
+    local requested="${1:-dev-latest}" endpoint commit_json
+    command -v jq > /dev/null 2>&1 || { xui_release_error "jq is required (install jq and retry)"; return 1; }
+    case "${requested}" in
+        dev | dev-latest) requested="dev-latest"; endpoint="tags/dev-latest" ;;
+        stable) endpoint="latest" ;;
+        *)
+            [[ "${requested}" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+                xui_release_error "Use dev, stable, or an explicit fork version such as v3.10.2"; return 1;
+            }
+            requested="v${requested#v}"; endpoint="tags/${requested}"
+            ;;
+    esac
+    XUI_RELEASE_JSON=$(curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 "${XUI_RELEASE_API}/releases/${endpoint}") || {
+        xui_release_error "Fork release ${requested} is unavailable; use Dev (dev-latest) when no stable release exists"; return 1;
+    }
+    XUI_RELEASE_TAG=$(printf '%s' "${XUI_RELEASE_JSON}" | jq -er '.tag_name | select(type == "string")') || return 1
+    [[ "${XUI_RELEASE_TAG}" == "${requested}" || ( "${requested}" == "stable" && "${XUI_RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ) ]] || {
+        xui_release_error "Unexpected fork release tag"; return 1;
+    }
+    # target_commitish on an edited rolling release can remain the original
+    # creation commit. Only the CI body marker identifies the published build.
+    if [[ "${XUI_RELEASE_TAG}" == "dev-latest" ]]; then
+        XUI_RELEASE_COMMIT=$(printf '%s' "${XUI_RELEASE_JSON}" | jq -er '.body | capture("(?im)^commit=(?<sha>[0-9a-f]{40})\\r?$").sha | ascii_downcase') || {
+            xui_release_error "Dev release has no full build commit marker"; return 1;
+        }
+    else
+        commit_json=$(curl -fsSL --retry 3 --connect-timeout 15 --max-time 60 "${XUI_RELEASE_API}/commits/${XUI_RELEASE_TAG}") || return 1
+        XUI_RELEASE_COMMIT=$(printf '%s' "${commit_json}" | jq -er '.sha') || return 1
+    fi
+    [[ "${XUI_RELEASE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] || { xui_release_error "Release commit is unknown"; return 1; }
+    # Panel/CLI launchers pass the exact release they used to obtain the script.
+    [[ -z "${XUI_EXPECTED_COMMIT:-}" || "${XUI_EXPECTED_COMMIT}" == "${XUI_RELEASE_COMMIT}" ]] || {
+        xui_release_error "Release moved while preparing the updater; retry"; return 1;
+    }
+}
+
+xui_asset_url() {
+    local name="$1" url expected
+    expected="https://github.com/${XUI_RELEASE_REPO}/releases/download/${XUI_RELEASE_TAG}/${name}"
+    url=$(printf '%s' "${XUI_RELEASE_JSON}" | jq -er --arg name "${name}" '[.assets[] | select(.name == $name) | .browser_download_url] | select(length == 1) | .[0]') || {
+        xui_release_error "Required release asset ${name} is missing"; return 1;
+    }
+    [[ "${url}" == "${expected}" ]] || { xui_release_error "Unexpected asset source for ${name}"; return 1; }
+    printf '%s\n' "${url}"
+}
+
+xui_verify_checksum() {
+    local file="$1" sums="$2" expected actual
+    expected=$(awk 'NR == 1 {print $1}' "${sums}")
+    if command -v sha256sum > /dev/null 2>&1; then
+        actual=$(sha256sum "${file}") || return 1
+    else
+        actual=$(shasum -a 256 "${file}") || return 1
+    fi
+    actual="${actual%% *}"
+    [[ "${expected}" =~ ^[0-9a-f]{64}$ && "${actual}" == "${expected}" ]] || {
+        xui_release_error "Required SHA256 checksum is invalid or does not match"; return 1;
+    }
+}
+
+# Stage every required resource before the caller stops or removes anything.
+# The archive marker also detects the publish-dev window where release notes
+# point at commit B but some of the moving tag's assets still belong to A.
+xui_prepare_release() {
+    local stage="$1" platform="$2" os_release="$3" asset url sums_url marker unit name
+    asset="x-ui-linux-${platform}.tar.gz"
+    url=$(xui_asset_url "${asset}") || return 1
+    sums_url=$(xui_asset_url "${asset}.sha256") || return 1
+    xui_download "${url}" "${stage}/archive.tar.gz" || return 1
+    xui_download "${sums_url}" "${stage}/archive.sha256" || return 1
+    xui_verify_checksum "${stage}/archive.tar.gz" "${stage}/archive.sha256" || return 1
+    tar -tzf "${stage}/archive.tar.gz" > "${stage}/entries" || { xui_release_error "Invalid release archive"; return 1; }
+    awk '$0 !~ /^x-ui\// || $0 ~ /(^|\/)\.\.(\/|$)/ {bad=1} END {exit bad}' "${stage}/entries" || {
+        xui_release_error "Unsafe archive paths"; return 1;
+    }
+    # Release packages contain regular files/directories, never links/devices.
+    tar -tvzf "${stage}/archive.tar.gz" | awk 'substr($0,1,1) !~ /[-d]/ {bad=1} END {exit bad}' || {
+        xui_release_error "Unsupported archive entry"; return 1;
+    }
+    tar -xzf "${stage}/archive.tar.gz" -C "${stage}" || { xui_release_error "Cannot extract release"; return 1; }
+    marker=$(cat "${stage}/x-ui/.release-commit" 2> /dev/null)
+    [[ "${marker}" == "${XUI_RELEASE_COMMIT}" ]] || {
+        xui_release_error "Archive build commit does not match release; retry after publishing finishes (older unmarked artifacts are unsupported)"; return 1;
+    }
+    [[ -s "${stage}/x-ui/x-ui" && -s "${stage}/x-ui/bin/xray-linux-${platform}" ]] || {
+        xui_release_error "Release is missing required binaries"; return 1;
+    }
+    case "${os_release}" in
+        alpine) unit="x-ui.rc" ;;
+        ubuntu | debian | armbian) unit="x-ui.service.debian" ;;
+        arch | manjaro | parch) unit="x-ui.service.arch" ;;
+        *) unit="x-ui.service.rhel" ;;
+    esac
+    # Prefer checksum-covered companions; fallback is pinned to the full commit.
+    [[ "${os_release}" != "alpine" && -s "${stage}/x-ui/x-ui.service" ]] && unit="x-ui.service"
+    for name in x-ui.sh "${unit}"; do
+        if [[ ! -s "${stage}/x-ui/${name}" ]]; then
+            xui_download "${XUI_RELEASE_RAW}/${XUI_RELEASE_COMMIT}/${name}" "${stage}/x-ui/${name}" || return 1
+        fi
+    done
+    cp "${stage}/x-ui/${unit}" "${stage}/service-unit" || return 1
+    bash -n "${stage}/x-ui/x-ui.sh" || { xui_release_error "Invalid CLI script"; return 1; }
+    rm -f "${stage}/archive.tar.gz" "${stage}/archive.sha256" "${stage}/entries"
+}
+# END FORK RELEASE SOURCE
+
 red='\033[0;31m'
 green='\033[0;32m'
 blue='\033[0;34m'
@@ -96,29 +246,29 @@ is_port_in_use() {
 install_base() {
     case "${release}" in
         ubuntu | debian | armbian)
-            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl
+            apt-get update && apt-get install -y -q cron curl jq tar tzdata socat ca-certificates openssl
             ;;
         fedora | amzn | virtuozzo | rhel | almalinux | rocky | ol)
-            dnf makecache -y && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl
+            dnf makecache -y && dnf install -y -q cronie curl jq tar tzdata socat ca-certificates openssl
             ;;
         centos)
             if [[ "${VERSION_ID}" =~ ^7 ]]; then
-                yum makecache -y && yum install -y cronie curl tar tzdata socat ca-certificates openssl
+                yum makecache -y && yum install -y cronie curl jq tar tzdata socat ca-certificates openssl
             else
-                dnf makecache -y && dnf install -y -q cronie curl tar tzdata socat ca-certificates openssl
+                dnf makecache -y && dnf install -y -q cronie curl jq tar tzdata socat ca-certificates openssl
             fi
             ;;
         arch | manjaro | parch)
-            pacman -Sy --noconfirm cronie curl tar tzdata socat ca-certificates openssl
+            pacman -Sy --noconfirm cronie curl jq tar tzdata socat ca-certificates openssl
             ;;
         opensuse-tumbleweed | opensuse-leap)
-            zypper refresh && zypper -q install -y cron curl tar timezone socat ca-certificates openssl
+            zypper refresh && zypper -q install -y cron curl jq tar timezone socat ca-certificates openssl
             ;;
         alpine)
-            apk update && apk add dcron curl tar tzdata socat ca-certificates openssl
+            apk update && apk add dcron curl jq tar tzdata socat ca-certificates openssl
             ;;
         *)
-            apt-get update && apt-get install -y -q cron curl tar tzdata socat ca-certificates openssl
+            apt-get update && apt-get install -y -q cron curl jq tar tzdata socat ca-certificates openssl
             ;;
     esac
 }
@@ -1611,20 +1761,14 @@ EOF
 # atomic mv, so a failed cp/curl or an interrupted mv never leaves a
 # truncated unit file at the live path -- systemd would then fail to parse
 # it on the next daemon-reload/start. Same pattern already used for
-# /usr/bin/x-ui elsewhere in this script. source_is_url picks cp (from a
-# file already extracted from the release tarball) vs curl (GitHub fallback).
+# /usr/bin/x-ui elsewhere in this script. The source is prepared locally.
 _install_xui_service_unit() {
     local source="$1"
-    local source_is_url="$2"
     local dest="${xui_service}/x-ui.service"
     local temp_file="${dest}.tmp.$$"
 
     rm -f "$temp_file"
-    if [[ "$source_is_url" == "true" ]]; then
-        curl -fLRo "$temp_file" "$source" > /dev/null 2>&1
-    else
-        cp -f "$source" "$temp_file" > /dev/null 2>&1
-    fi
+    cp -f "$source" "$temp_file" > /dev/null 2>&1
     if [[ $? -ne 0 ]]; then
         rm -f "$temp_file"
         return 1
@@ -1646,144 +1790,22 @@ _install_xui_service_unit() {
     return 0
 }
 
-# resolve_latest_tag prints the latest stable release tag. It prefers the web
-# releases/latest redirect, which is not subject to the unauthenticated API's
-# 60 req/h-per-IP limit that trips shared CI/CGNAT addresses (the install then
-# fails with "Failed to fetch x-ui version"), and falls back to the API.
-resolve_latest_tag() {
-    local url tag
-    url=$(curl -sSLI -o /dev/null -w '%{url_effective}' --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://github.com/MHSanaei/3x-ui/releases/latest" 2>/dev/null)
-    tag=${url##*/tag/}
-    if [[ "$tag" != "$url" && -n "$tag" && "$tag" != "latest" ]]; then
-        echo "$tag"
-        return 0
-    fi
-    curl -Ls --retry 5 --retry-delay 3 --connect-timeout 15 --max-time 60 "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/'
-}
-
-# Releases publish <asset>.sha256 next to each archive. A mismatch or a failed
-# sidecar download aborts the install; only a 404 (releases predating the
-# sidecar) is tolerated with a warning.
-verify_release_checksum() {
-    local url="$1" file="$2" sums="$2.sha256" code expected actual
-    rm -f "${sums}"
-    code=$(curl -sL --retry 3 --retry-delay 3 --connect-timeout 15 --max-time 60 -o "${sums}" -w '%{http_code}' "${url}.sha256")
-    if [[ "${code}" == "404" ]]; then
-        rm -f "${sums}"
-        echo -e "${yellow}No checksum published for this release, skipping verification${plain}"
-        return 0
-    fi
-    if [[ "${code}" != "200" ]]; then
-        rm -f "${sums}" "${file}"
-        echo -e "${red}Failed to download the checksum for $(basename "${file}") (HTTP ${code})${plain}"
-        exit 1
-    fi
-    expected=$(awk 'NR == 1 {print $1}' "${sums}")
-    actual=$(sha256sum "${file}" | awk '{print $1}')
-    rm -f "${sums}"
-    if [[ ! "${expected}" =~ ^[0-9a-f]{64}$ || "${expected}" != "${actual}" ]]; then
-        rm -f "${file}"
-        echo -e "${red}Checksum mismatch for $(basename "${file}"): expected ${expected:-<none>}, got ${actual}${plain}"
-        exit 1
-    fi
-    echo -e "${green}Checksum verified: ${actual}${plain}"
-}
-
-# Older tags predate some of these files (x-ui.rc arrived in v2.8.4). Serving
-# main's copy against an old binary is the mismatch this pinning exists to
-# prevent, so probe before anything is stopped or removed and refuse the tag.
-require_repo_files() {
-    local ref="$1" name status
-    shift
-    [[ "${ref}" == "main" ]] && return 0
-    for name in "$@"; do
-        status=$(curl -sIL --retry 3 --connect-timeout 15 -o /dev/null -w '%{http_code}' "https://raw.githubusercontent.com/MHSanaei/3x-ui/${ref}/${name}")
-        if [[ "${status}" != "200" ]]; then
-            echo -e "${red}${name} is not available for ${ref} (HTTP ${status})${plain}"
-            echo -e "${red}Install a release that ships it, or 'dev' for the rolling build. Your existing installation has not been touched.${plain}"
-            exit 1
-        fi
-    done
-}
-
 install_x-ui() {
-    cd ${xui_folder%/x-ui}/
-
-    # Download resources
-    if [ $# == 0 ]; then
-        tag_version=$(resolve_latest_tag)
-        if [[ ! -n "$tag_version" ]]; then
-            echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
-            exit 1
-        fi
-        echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-        curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
-            exit 1
-        fi
-        if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
-            rm ${xui_folder}-linux-$(arch).tar.gz -f
-            echo -e "${red}Downloaded x-ui release archive is empty${plain}"
-            exit 1
-        fi
-        verify_release_checksum "https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz" "${xui_folder}-linux-$(arch).tar.gz"
-    else
-        tag_version=$1
-        # The rolling dev channel ships under a fixed, non-semver tag that is
-        # force-moved to the latest main commit on every push. Accept `dev` as a
-        # convenient alias and skip the numeric floor check for it.
-        if [[ "$tag_version" == "dev" || "$tag_version" == "dev-latest" ]]; then
-            tag_version="dev-latest"
-            echo -e "${yellow}Installing the rolling dev build (tag: dev-latest). This is a per-commit pre-release, not a stable version.${plain}"
-        else
-            tag_version_numeric=${tag_version#v}
-            min_version="2.3.5"
-
-            if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
-                echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
-                exit 1
-            fi
-        fi
-
-        url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
-        echo -e "Beginning to install x-ui ${tag_version}"
-        curl -fLR --retry 5 --retry-delay 3 --connect-timeout 15 --speed-limit 1 --speed-time 300 -o ${xui_folder}-linux-$(arch).tar.gz ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui ${tag_version} failed, please check if the version exists ${plain}"
-            exit 1
-        fi
-        if [[ ! -s ${xui_folder}-linux-$(arch).tar.gz ]]; then
-            rm ${xui_folder}-linux-$(arch).tar.gz -f
-            echo -e "${red}Downloaded x-ui release archive is empty${plain}"
-            exit 1
-        fi
-        verify_release_checksum "${url}" "${xui_folder}-linux-$(arch).tar.gz"
+    local xui_script_temp
+    xui_resolve_release "${1:-${XUI_UPDATE_TAG:-dev-latest}}" || exit 1
+    if [[ -z "${XUI_EXPECTED_COMMIT:-}" ]]; then
+        xui_run_pinned_script install.sh
+        exit $?
     fi
-    # x-ui.sh, x-ui.rc and the unit files must come from the same release as
-    # the binary; only the rolling dev build tracks main.
-    local script_ref="${tag_version}"
-    if [[ "${tag_version}" == "dev-latest" ]]; then
-        script_ref="main"
-    fi
-    # The unit files are only fetched when the release tarball lacks them, so
-    # they are checked at that point instead of here.
-    local required_files=("x-ui.sh")
-    [[ $release == "alpine" ]] && required_files+=("x-ui.rc")
-    require_repo_files "${script_ref}" "${required_files[@]}"
-    local xui_script_temp="/usr/bin/x-ui-temp.$$"
-    rm -f "${xui_script_temp}"
-    curl -fLRo "${xui_script_temp}" "https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.sh"
-    if [[ $? -ne 0 ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Failed to download x-ui.sh${plain}"
-        exit 1
-    fi
-    if [[ ! -s "${xui_script_temp}" ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Downloaded x-ui.sh is empty${plain}"
-        exit 1
-    fi
+    tag_version="${XUI_RELEASE_TAG}"
+    mkdir -p "${xui_folder%/*}" || exit 1
+    xui_stage=$(mktemp -d "${xui_folder%/*}/.x-ui-release.XXXXXX") || exit 1
+    trap 'rm -rf "${xui_stage}"' EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    xui_prepare_release "${xui_stage}" "$(arch)" "${release}" || exit 1
+    xui_script_temp="${xui_stage}/cli"
+    cp "${xui_stage}/x-ui/x-ui.sh" "${xui_script_temp}" || exit 1
 
     # Stop x-ui service and remove old resources
     local custom_bin_backup=""
@@ -1819,30 +1841,14 @@ install_x-ui() {
                 echo -e "${yellow}Could not back up bin/ -- custom files there will not be preserved across this update${plain}"
             fi
         fi
-        # Sole cleanup path for the backup from here on -- covers both the
-        # two `exit 1`s below (extraction/binary-missing failures) and an
-        # interrupted update (Ctrl-C, signal) before the restore runs.
-        # Cleared once the restore below finishes normally.
-        trap '[[ -n "${custom_bin_backup}" ]] && rm -rf "${custom_bin_backup}"' EXIT INT TERM
-        rm ${xui_folder}/ -rf
+        # Clean up staging and any custom-file backup on exit/interruption.
+        trap 'rm -rf "${xui_stage}"; [[ -z "${custom_bin_backup}" ]] || rm -rf "${custom_bin_backup}"' EXIT
+        rm -rf "${xui_folder}/"
     fi
 
-    # Extract resources and set permissions
-    tar zxvf x-ui-linux-$(arch).tar.gz
-    if [[ $? -ne 0 ]]; then
-        rm x-ui-linux-$(arch).tar.gz -f
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Failed to extract the x-ui release archive -- the previous installation has already been removed, so the panel will not start until this is fixed; try running the installer again${plain}"
-        exit 1
-    fi
-    rm x-ui-linux-$(arch).tar.gz -f
-
-    cd x-ui
-    if [[ $? -ne 0 || ! -s x-ui ]]; then
-        rm -f "${xui_script_temp}"
-        echo -e "${red}Extracted x-ui archive is missing the x-ui binary -- the previous installation has already been removed, so the panel will not start until this is fixed; try running the installer again${plain}"
-        exit 1
-    fi
+    # All network, checksum and extraction checks completed before stopping x-ui.
+    mv "${xui_stage}/x-ui" "${xui_folder}" || exit 1
+    cd "${xui_folder}" || exit 1
     chmod +x x-ui
     chmod +x x-ui.sh
 
@@ -1895,7 +1901,6 @@ install_x-ui() {
             echo -e "${green}Restored custom file(s) in bin/ not shipped by this release: ${restored_custom_bin[*]}${plain}"
         fi
     fi
-    trap - EXIT INT TERM
 
     rm -f bin/tuic-server bin/tuic-server-* > /dev/null 2>&1 || true
     rm -rf bin/tuic > /dev/null 2>&1 || true
@@ -1928,7 +1933,7 @@ install_x-ui() {
     if [[ $release == "alpine" ]]; then
         xui_rc_temp="/etc/init.d/x-ui.tmp.$$"
         rm -f "${xui_rc_temp}"
-        curl -fLRo "${xui_rc_temp}" "https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.rc"
+        cp "${xui_stage}/service-unit" "${xui_rc_temp}"
         if [[ $? -ne 0 ]]; then
             rm -f "${xui_rc_temp}"
             echo -e "${red}Failed to download x-ui.rc${plain}"
@@ -1949,78 +1954,15 @@ install_x-ui() {
         rc-update add x-ui
         rc-service x-ui start
     else
-        # Install systemd service file
-        service_installed=false
-
-        if [ -f "x-ui.service" ]; then
-            echo -e "${green}Found x-ui.service in extracted files, installing...${plain}"
-            if _install_xui_service_unit "x-ui.service" "false"; then
-                service_installed=true
-            fi
-        fi
-
-        if [ "$service_installed" = false ]; then
-            case "${release}" in
-                ubuntu | debian | armbian)
-                    if [ -f "x-ui.service.debian" ]; then
-                        echo -e "${green}Found x-ui.service.debian in extracted files, installing...${plain}"
-                        if _install_xui_service_unit "x-ui.service.debian" "false"; then
-                            service_installed=true
-                        fi
-                    fi
-                    ;;
-                arch | manjaro | parch)
-                    if [ -f "x-ui.service.arch" ]; then
-                        echo -e "${green}Found x-ui.service.arch in extracted files, installing...${plain}"
-                        if _install_xui_service_unit "x-ui.service.arch" "false"; then
-                            service_installed=true
-                        fi
-                    fi
-                    ;;
-                *)
-                    if [ -f "x-ui.service.rhel" ]; then
-                        echo -e "${green}Found x-ui.service.rhel in extracted files, installing...${plain}"
-                        if _install_xui_service_unit "x-ui.service.rhel" "false"; then
-                            service_installed=true
-                        fi
-                    fi
-                    ;;
-            esac
-        fi
-
-        # If service file not found in tar.gz, download from GitHub
-        if [ "$service_installed" = false ]; then
-            echo -e "${yellow}Service files not found in tar.gz, downloading from GitHub...${plain}"
-            case "${release}" in
-                ubuntu | debian | armbian)
-                    service_unit_url="https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.service.debian"
-                    ;;
-                arch | manjaro | parch)
-                    service_unit_url="https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.service.arch"
-                    ;;
-                *)
-                    service_unit_url="https://raw.githubusercontent.com/MHSanaei/3x-ui/${script_ref}/x-ui.service.rhel"
-                    ;;
-            esac
-
-            if ! _install_xui_service_unit "$service_unit_url" "true"; then
-                echo -e "${red}Failed to install x-ui.service from GitHub (${script_ref}) -- the release tarball did not ship one either${plain}"
-                exit 1
-            fi
-            service_installed=true
-        fi
-
-        if [ "$service_installed" = true ]; then
-            echo -e "${green}Setting up systemd unit...${plain}"
-            chown root:root ${xui_service}/x-ui.service > /dev/null 2>&1
-            chmod 644 ${xui_service}/x-ui.service > /dev/null 2>&1
-            systemctl daemon-reload
-            systemctl enable x-ui
-            systemctl start x-ui
-        else
-            echo -e "${red}Failed to install x-ui.service file${plain}"
+        if ! _install_xui_service_unit "${xui_stage}/service-unit"; then
+            echo -e "${red}Failed to install prepared systemd unit${plain}"
             exit 1
         fi
+        chown root:root "${xui_service}/x-ui.service"
+        chmod 644 "${xui_service}/x-ui.service"
+        systemctl daemon-reload
+        systemctl enable x-ui
+        systemctl start x-ui
     fi
 
     # IP Limit relies on fail2ban; install + configure it now so the feature
@@ -2051,4 +1993,4 @@ install_x-ui() {
 
 echo -e "${green}Running...${plain}"
 install_base
-install_x-ui $1
+install_x-ui "$@"
